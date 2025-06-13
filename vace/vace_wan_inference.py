@@ -9,9 +9,10 @@ import os
 import sys
 import warnings
 
-warnings.filterwarnings('ignore')
+warnings.filterwarnings("ignore")
 
 import torch, random
+import string
 import torch.distributed as dist
 from PIL import Image
 
@@ -19,45 +20,45 @@ import wan
 from wan.utils.utils import cache_video, cache_image, str2bool
 
 from models.wan import WanVace
-from models.wan.configs import WAN_CONFIGS, SIZE_CONFIGS, MAX_AREA_CONFIGS, SUPPORTED_SIZES
+from models.wan.configs import (
+    WAN_CONFIGS,
+    SIZE_CONFIGS,
+    MAX_AREA_CONFIGS,
+    SUPPORTED_SIZES,
+)
 from annotators.utils import get_annotator
 
 EXAMPLE_PROMPT = {
     "vace-1.3B": {
-        "src_ref_images": 'assets/images/girl.png,assets/images/snake.png',
-        "prompt": "在一个欢乐而充满节日气氛的场景中，穿着鲜艳红色春服的小女孩正与她的可爱卡通蛇嬉戏。她的春服上绣着金色吉祥图案，散发着喜庆的气息，脸上洋溢着灿烂的笑容。蛇身呈现出亮眼的绿色，形状圆润，宽大的眼睛让它显得既友善又幽默。小女孩欢快地用手轻轻抚摸着蛇的头部，共同享受着这温馨的时刻。周围五彩斑斓的灯笼和彩带装饰着环境，阳光透过洒在她们身上，营造出一个充满友爱与幸福的新年氛围。"
+        "src_ref_images": "assets/images/girl.png,assets/images/snake.png",
+        "prompt": "在一个欢乐而充满节日气氛的场景中，穿着鲜艳红色春服的小女孩正与她的可爱卡通蛇嬉戏。她的春服上绣着金色吉祥图案，散发着喜庆的气息，脸上洋溢着灿烂的笑容。蛇身呈现出亮眼的绿色，形状圆润，宽大的眼睛让它显得既友善又幽默。小女孩欢快地用手轻轻抚摸着蛇的头部，共同享受着这温馨的时刻。周围五彩斑斓的灯笼和彩带装饰着环境，阳光透过洒在她们身上，营造出一个充满友爱与幸福的新年氛围。",
     },
     "vace-14B": {
-        "src_ref_images": 'assets/images/girl.png,assets/images/snake.png',
-        "prompt": "在一个欢乐而充满节日气氛的场景中，穿着鲜艳红色春服的小女孩正与她的可爱卡通蛇嬉戏。她的春服上绣着金色吉祥图案，散发着喜庆的气息，脸上洋溢着灿烂的笑容。蛇身呈现出亮眼的绿色，形状圆润，宽大的眼睛让它显得既友善又幽默。小女孩欢快地用手轻轻抚摸着蛇的头部，共同享受着这温馨的时刻。周围五彩斑斓的灯笼和彩带装饰着环境，阳光透过洒在她们身上，营造出一个充满友爱与幸福的新年氛围。"
-    }
+        "src_ref_images": "assets/images/girl.png,assets/images/snake.png",
+        "prompt": "在一个欢乐而充满节日气氛的场景中，穿着鲜艳红色春服的小女孩正与她的可爱卡通蛇嬉戏。她的春服上绣着金色吉祥图案，散发着喜庆的气息，脸上洋溢着灿烂的笑容。蛇身呈现出亮眼的绿色，形状圆润，宽大的眼睛让它显得既友善又幽默。小女孩欢快地用手轻轻抚摸着蛇的头部，共同享受着这温馨的时刻。周围五彩斑斓的灯笼和彩带装饰着环境，阳光透过洒在她们身上，营造出一个充满友爱与幸福的新年氛围。",
+    },
 }
 
 
-
-
 def validate_args(args):
-    # Basic check
     assert args.ckpt_dir is not None, "Please specify the checkpoint directory."
     assert args.model_name in WAN_CONFIGS, f"Unsupport model name: {args.model_name}"
     assert args.model_name in EXAMPLE_PROMPT, f"Unsupport model name: {args.model_name}"
-
-    # The default sampling steps are 40 for image-to-video tasks and 50 for text-to-video tasks.
     if args.sample_steps is None:
         args.sample_steps = 50
-
     if args.sample_shift is None:
         args.sample_shift = 16
-
-    # The default number of frames are 1 for text-to-image tasks and 81 for other tasks.
     if args.frame_num is None:
         args.frame_num = 81
 
-    args.base_seed = args.base_seed if args.base_seed >= 0 else random.randint(
-        0, sys.maxsize)
-    # Size check
-    assert args.size in SUPPORTED_SIZES[
-        args.model_name], f"Unsupport size {args.size} for model name {args.model_name}, supported sizes are: {', '.join(SUPPORTED_SIZES[args.model_name])}"
+    args.base_seed = (
+        args.base_seed if args.base_seed >= 0 else random.randint(0, sys.maxsize)
+    )
+
+    assert (
+        args.size in SUPPORTED_SIZES[args.model_name]
+    ), f"Unsupport size {args.size} for model name {args.model_name}, supported sizes are: {', '.join(SUPPORTED_SIZES[args.model_name])}"
+
     return args
 
 
@@ -66,168 +67,115 @@ def get_parser():
         description="Generate a image or video from a text prompt or image using Wan"
     )
     parser.add_argument(
-        "--model_name",
-        type=str,
-        default="vace-1.3B",
-        choices=list(WAN_CONFIGS.keys()),
-        help="The model name to run.")
-    parser.add_argument(
-        "--size",
-        type=str,
-        default="480p",
-        choices=list(SIZE_CONFIGS.keys()),
-        help="The area (width*height) of the generated video. For the I2V task, the aspect ratio of the output video will follow that of the input image."
+        "--model_name", type=str, default="vace-1.3B", choices=list(WAN_CONFIGS.keys())
     )
     parser.add_argument(
-        "--frame_num",
-        type=int,
-        default=81,
-        help="How many frames to sample from a image or video. The number should be 4n+1"
+        "--size", type=str, default="480p", choices=list(SIZE_CONFIGS.keys())
     )
+    parser.add_argument("--frame_num", type=int, default=81)
+    parser.add_argument("--ckpt_dir", type=str, default="models/Wan2.1-VACE-1.3B/")
+    parser.add_argument("--offload_model", type=str2bool, default=None)
+    parser.add_argument("--ulysses_size", type=int, default=1)
+    parser.add_argument("--ring_size", type=int, default=1)
+    parser.add_argument("--t5_fsdp", action="store_true", default=False)
+    parser.add_argument("--t5_cpu", action="store_true", default=False)
+    parser.add_argument("--dit_fsdp", action="store_true", default=False)
+    parser.add_argument("--save_dir", type=str, default=None)
+    parser.add_argument("--save_file", type=str, default=None)
+    parser.add_argument("--src_video", type=str, default=None)
+    parser.add_argument("--src_mask", type=str, default=None)
+    parser.add_argument("--src_ref_images", type=str, default=None)
+    parser.add_argument("--prompt", type=str, default=None)
     parser.add_argument(
-        "--ckpt_dir",
+        "--prompt_file",
         type=str,
-        default='models/Wan2.1-VACE-1.3B/',
-        help="The path to the checkpoint directory.")
-    parser.add_argument(
-        "--offload_model",
-        type=str2bool,
         default=None,
-        help="Whether to offload the model to CPU after each model forward, reducing GPU memory usage."
+        help="Path to a file containing the prompt text",
     )
-    parser.add_argument(
-        "--ulysses_size",
-        type=int,
-        default=1,
-        help="The size of the ulysses parallelism in DiT.")
-    parser.add_argument(
-        "--ring_size",
-        type=int,
-        default=1,
-        help="The size of the ring attention parallelism in DiT.")
-    parser.add_argument(
-        "--t5_fsdp",
-        action="store_true",
-        default=False,
-        help="Whether to use FSDP for T5.")
-    parser.add_argument(
-        "--t5_cpu",
-        action="store_true",
-        default=False,
-        help="Whether to place T5 model on CPU.")
-    parser.add_argument(
-        "--dit_fsdp",
-        action="store_true",
-        default=False,
-        help="Whether to use FSDP for DiT.")
-    parser.add_argument(
-        "--save_dir",
-        type=str,
-        default=None,
-        help="The file to save the generated image or video to.")
-    parser.add_argument(
-        "--save_file",
-        type=str,
-        default=None,
-        help="The file to save the generated image or video to.")
-    parser.add_argument(
-        "--src_video",
-        type=str,
-        default=None,
-        help="The file of the source video. Default None.")
-    parser.add_argument(
-        "--src_mask",
-        type=str,
-        default=None,
-        help="The file of the source mask. Default None.")
-    parser.add_argument(
-        "--src_ref_images",
-        type=str,
-        default=None,
-        help="The file list of the source reference images. Separated by ','. Default None.")
-    parser.add_argument(
-        "--prompt",
-        type=str,
-        default=None,
-        help="The prompt to generate the image or video from.")
     parser.add_argument(
         "--use_prompt_extend",
-        default='plain',
-        choices=['plain', 'wan_zh', 'wan_en', 'wan_zh_ds', 'wan_en_ds'],
-        help="Whether to use prompt extend.")
+        default="plain",
+        choices=["plain", "wan_zh", "wan_en", "wan_zh_ds", "wan_en_ds"],
+    )
+    parser.add_argument("--base_seed", type=int, default=2025)
     parser.add_argument(
-        "--base_seed",
-        type=int,
-        default=2025,
-        help="The seed to use for generating the image or video.")
-    parser.add_argument(
-        "--sample_solver",
-        type=str,
-        default='unipc',
-        choices=['unipc', 'dpm++'],
-        help="The solver used to sample.")
-    parser.add_argument(
-        "--sample_steps", type=int, default=None, help="The sampling steps.")
-    parser.add_argument(
-        "--sample_shift",
-        type=float,
-        default=None,
-        help="Sampling shift factor for flow matching schedulers.")
-    parser.add_argument(
-        "--sample_guide_scale",
-        type=float,
-        default=5.0,
-        help="Classifier free guidance scale.")
+        "--sample_solver", type=str, default="unipc", choices=["unipc", "dpm++"]
+    )
+    parser.add_argument("--sample_steps", type=int, default=None)
+    parser.add_argument("--sample_shift", type=float, default=None)
+    parser.add_argument("--sample_guide_scale", type=float, default=5.0)
     return parser
 
 
 def _init_logging(rank):
-    # logging
     if rank == 0:
-        # set format
         logging.basicConfig(
             level=logging.INFO,
             format="[%(asctime)s] %(levelname)s: %(message)s",
-            handlers=[logging.StreamHandler(stream=sys.stdout)])
+            handlers=[logging.StreamHandler(stream=sys.stdout)],
+        )
     else:
         logging.basicConfig(level=logging.ERROR)
 
 
 def main(args):
     args = argparse.Namespace(**args) if isinstance(args, dict) else args
-    args = validate_args(args)
+    # args = validate_args(args)
 
-    rank = int(os.getenv("RANK", 0))
-    world_size = int(os.getenv("WORLD_SIZE", 1))
-    local_rank = int(os.getenv("LOCAL_RANK", 0))
+    # Simple word generation function
+    def generate_random_word(length=None):
+        if length is None:
+            length = random.randint(1, 16)
+        consonants = "bcdfghjklmnpqrstvwxyz"
+        vowels = "aeiou"
+        word = ""
+        r = random.randint(1, 4)
+        for i in range(length):
+            if i % r == 0:
+                word += random.choice(consonants)
+            else:
+                word += random.choice(vowels)
+        return word
+
+    rank = int(os.environ.get("RANK", "0"))
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
     device = local_rank
     _init_logging(rank)
 
+    logging.info(f"[DEBUG] rank={rank} world_size={world_size} local_rank={local_rank}")
+
     if args.offload_model is None:
         args.offload_model = False if world_size > 1 else True
-        logging.info(
-            f"offload_model is not specified, set to {args.offload_model}.")
+        logging.info(f"offload_model is not specified, set to {args.offload_model}.")
+
     if world_size > 1:
         torch.cuda.set_device(local_rank)
         dist.init_process_group(
-            backend="nccl",
-            init_method="env://",
-            rank=rank,
-            world_size=world_size)
+            backend="nccl", init_method="env://", rank=rank, world_size=world_size
+        )
     else:
         assert not (
             args.t5_fsdp or args.dit_fsdp
-        ), f"t5_fsdp and dit_fsdp are not supported in non-distributed environments."
+        ), "t5_fsdp and dit_fsdp are not supported in non-distributed environments."
         assert not (
             args.ulysses_size > 1 or args.ring_size > 1
-        ), f"context parallel are not supported in non-distributed environments."
+        ), "context parallel is not supported in non-distributed environments."
 
     if args.ulysses_size > 1 or args.ring_size > 1:
-        assert args.ulysses_size * args.ring_size == world_size, f"The number of ulysses_size and ring_size should be equal to the world size."
-        from xfuser.core.distributed import (initialize_model_parallel,
-                                             init_distributed_environment)
+        assert (
+            args.ulysses_size * args.ring_size == world_size
+        ), "The number of ulysses_size and ring_size should be equal to the world size."
+        from xfuser.core.distributed import (
+            initialize_model_parallel,
+            init_distributed_environment,
+        )
+
         init_distributed_environment(
-            rank=dist.get_rank(), world_size=dist.get_world_size())
+            rank=dist.get_rank(),
+            world_size=dist.get_world_size(),
+            local_rank=local_rank,
+        )
 
         initialize_model_parallel(
             sequence_parallel_degree=dist.get_world_size(),
@@ -235,12 +183,16 @@ def main(args):
             ulysses_degree=args.ulysses_size,
         )
 
-    if args.use_prompt_extend and args.use_prompt_extend != 'plain':
-        prompt_expander = get_annotator(config_type='prompt', config_task=args.use_prompt_extend, return_dict=False)
+    if args.use_prompt_extend and args.use_prompt_extend != "plain":
+        prompt_expander = get_annotator(
+            config_type="prompt", config_task=args.use_prompt_extend, return_dict=False
+        )
 
     cfg = WAN_CONFIGS[args.model_name]
     if args.ulysses_size > 1:
-        assert cfg.num_heads % args.ulysses_size == 0, f"`num_heads` must be divisible by `ulysses_size`."
+        assert (
+            cfg.num_heads % args.ulysses_size == 0
+        ), "`num_heads` must be divisible by `ulysses_size`."
 
     logging.info(f"Generation job args: {args}")
     logging.info(f"Generation model config: {cfg}")
@@ -250,14 +202,16 @@ def main(args):
         dist.broadcast_object_list(base_seed, src=0)
         args.base_seed = base_seed[0]
 
-    if args.prompt is None:
-        args.prompt = EXAMPLE_PROMPT[args.model_name]["prompt"]
-        args.src_video = EXAMPLE_PROMPT[args.model_name].get("src_video", None)
-        args.src_mask = EXAMPLE_PROMPT[args.model_name].get("src_mask", None)
-        args.src_ref_images = EXAMPLE_PROMPT[args.model_name].get("src_ref_images", None)
+    # if args.prompt is None:
+    #     args.prompt = EXAMPLE_PROMPT[args.model_name]["prompt"]
+    #     args.src_video = EXAMPLE_PROMPT[args.model_name].get("src_video", None)
+    #     args.src_mask = EXAMPLE_PROMPT[args.model_name].get("src_mask", None)
+    #     args.src_ref_images = EXAMPLE_PROMPT[args.model_name].get(
+    #         "src_ref_images", None
+    #     )
 
     logging.info(f"Input prompt: {args.prompt}")
-    if args.use_prompt_extend and args.use_prompt_extend != 'plain':
+    if args.use_prompt_extend and args.use_prompt_extend != "plain":
         logging.info("Extending prompt ...")
         if rank == 0:
             prompt = prompt_expander.forward(args.prompt)
@@ -269,6 +223,39 @@ def main(args):
             dist.broadcast_object_list(input_prompt, src=0)
         args.prompt = input_prompt[0]
         logging.info(f"Extended prompt: {args.prompt}")
+
+    # Define word_count for random word generation
+    word_count = 5  # Default number of random words to generate
+
+    # If prompt_file is provided, read prompt from file
+    logging.info(f"Almost updating prompt from file: {args.prompt_file}")
+    if args.prompt_file is not None:
+        try:
+            logging.info(f"Updating prompt from file: {args.prompt_file}")
+            # Check if the path is absolute or relative
+            prompt_path = args.prompt_file
+            if not os.path.isabs(prompt_path) and not os.path.exists(prompt_path):
+                # Try looking in the assets/prompts directory
+                prompt_path = os.path.join("assets", "prompts", args.prompt_file)
+
+            with open(prompt_path, "r") as f:
+                args.prompt = f.read().strip()
+            logging.info(f"Read prompt from file: {prompt_path}")
+        except Exception as e:
+            logging.error(f"Error reading prompt file: {e}")
+            # Fall back to random words if file reading fails
+            random_words = [generate_random_word() for _ in range(word_count)]
+            args.prompt = " ".join(random_words)
+            logging.info(f"Generated random prompt: {args.prompt}")
+    # If no prompt and no prompt file, generate random words
+    elif args.prompt is None:
+        random_words = [generate_random_word() for _ in range(word_count)]
+        args.prompt = " ".join(random_words)
+        logging.info(f"Generated random prompt: {args.prompt}")
+    else:
+        logging.info(f"Using provided prompt: {args.prompt}")
+
+    logging.info(f"prompt: `'{args.prompt}'`")
 
     logging.info("Creating WanT2V pipeline.")
     wan_vace = WanVace(
@@ -282,12 +269,22 @@ def main(args):
         t5_cpu=args.t5_cpu,
     )
 
-    src_video, src_mask, src_ref_images = wan_vace.prepare_source([args.src_video],
-                                                                  [args.src_mask],
-                                                                  [None if args.src_ref_images is None else args.src_ref_images.split(',')],
-                                                                  args.frame_num, SIZE_CONFIGS[args.size], device)
+    src_video, src_mask, src_ref_images = wan_vace.prepare_source(
+        [args.src_video],
+        [args.src_mask],
+        [None if args.src_ref_images is None else args.src_ref_images.split(",")],
+        args.frame_num,
+        SIZE_CONFIGS[args.size],
+        device,
+    )
 
+    word_count = 128
+
+    logging.info(f"Input prompt: {args.prompt}")
     logging.info(f"Generating video...")
+    # Use default value of 50 for sampling_steps if None is provided
+    sampling_steps = 50 if args.sample_steps is None else args.sample_steps
+
     video = wan_vace.generate(
         args.prompt,
         src_video,
@@ -297,67 +294,83 @@ def main(args):
         frame_num=args.frame_num,
         shift=args.sample_shift,
         sample_solver=args.sample_solver,
-        sampling_steps=args.sample_steps,
+        sampling_steps=sampling_steps,
         guide_scale=args.sample_guide_scale,
         seed=args.base_seed,
-        offload_model=args.offload_model)
+        offload_model=args.offload_model,
+    )
 
     ret_data = {}
     if rank == 0:
         if args.save_dir is None:
-            save_dir = os.path.join('results', args.model_name, time.strftime('%Y-%m-%d-%H-%M-%S', time.localtime(time.time())))
+            save_dir = os.path.join(
+                "results",
+                args.model_name,
+                time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime(time.time())),
+            )
         else:
             save_dir = args.save_dir
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
+        # Save the prompt to prompt.txt in the result directory
+        prompt_file = os.path.join(save_dir, "prompt.txt")
+        with open(prompt_file, "w") as f:
+            f.write(args.prompt)
+        logging.info(f"Saved prompt to {prompt_file}")
+
         if args.save_file is not None:
             save_file = args.save_file
         else:
-            save_file = os.path.join(save_dir, 'out_video.mp4')
+            save_file = os.path.join(save_dir, "out_video.mp4")
         cache_video(
             tensor=video[None],
             save_file=save_file,
             fps=cfg.sample_fps,
             nrow=1,
             normalize=True,
-            value_range=(-1, 1))
+            value_range=(-1, 1),
+        )
         logging.info(f"Saving generated video to {save_file}")
-        ret_data['out_video'] = save_file
+        ret_data["out_video"] = save_file
 
-        save_file = os.path.join(save_dir, 'src_video.mp4')
+        save_file = os.path.join(save_dir, "src_video.mp4")
         cache_video(
             tensor=src_video[0][None],
             save_file=save_file,
             fps=cfg.sample_fps,
             nrow=1,
             normalize=True,
-            value_range=(-1, 1))
+            value_range=(-1, 1),
+        )
         logging.info(f"Saving src_video to {save_file}")
-        ret_data['src_video'] = save_file
+        ret_data["src_video"] = save_file
 
-        save_file = os.path.join(save_dir, 'src_mask.mp4')
+        save_file = os.path.join(save_dir, "src_mask.mp4")
         cache_video(
             tensor=src_mask[0][None],
             save_file=save_file,
             fps=cfg.sample_fps,
             nrow=1,
             normalize=True,
-            value_range=(0, 1))
+            value_range=(0, 1),
+        )
         logging.info(f"Saving src_mask to {save_file}")
-        ret_data['src_mask'] = save_file
+        ret_data["src_mask"] = save_file
 
         if src_ref_images[0] is not None:
             for i, ref_img in enumerate(src_ref_images[0]):
-                save_file = os.path.join(save_dir, f'src_ref_image_{i}.png')
+                save_file = os.path.join(save_dir, f"src_ref_image_{i}.png")
                 cache_image(
                     tensor=ref_img[:, 0, ...],
                     save_file=save_file,
                     nrow=1,
                     normalize=True,
-                    value_range=(-1, 1))
+                    value_range=(-1, 1),
+                )
                 logging.info(f"Saving src_ref_image_{i} to {save_file}")
-                ret_data[f'src_ref_image_{i}'] = save_file
+                ret_data[f"src_ref_image_{i}"] = save_file
+
     logging.info("Finished.")
     return ret_data
 
