@@ -19,6 +19,7 @@ from PIL import Image
 import wan
 from wan.utils.utils import cache_video, cache_image, str2bool
 
+
 from models.wan import WanVace
 from models.wan.configs import (
     WAN_CONFIGS,
